@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <!-- JQuery and popper.js for bootstrap -->
+    <script
+      src="https://code.jquery.com/jquery-3.4.1.min.js"
+      integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+      crossorigin="anonymous"
+    ></script>
+    <!--script src="https://code.jquery.com/jquery-3.4.1.slim.min.js" integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" crossorigin="anonymous"></script-->
+    <script
+      src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"
+      integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo"
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- Bootstrap -->
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+      integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"
+      integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6"
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- MultiSelect CSS & JS library -->
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.10/css/select2.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.10/js/select2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.10/js/i18n/en.js"></script>
+    <script>
+      let urls = {
+        sheetUrl: "",
+        formUrl: "",
+        appUrl: ""
+      };
+      let attendenceSelector;
+      let actionTypeSelector;
+      let actionTypes = [
+        {
+          id: "support",
+          text: "Support Action"
+        },
+        {
+          id: "activeSupport",
+          text: "Active Support Action"
+        },
+        {
+          id: "member",
+          text: "Member Action"
+        }
+      ];
+      let sheetData = [[]];
+      let columnHeaders = [];
+      let goalsData = [];
+      let updateGoals = false;
+      let editingGoals = true;
+
+      $(document).ready(function() {
+        console.log("jquery says document is ready");
+        attendenceSelector = $("#attendence_selector");
+        actionTypeSelector = $("#action_type_selector");
+        attendenceSelector.select2({
+          data: []
+        });
+        actionTypeSelector.select2({
+          data: actionTypes,
+          allowClear: false
+        });
+        google.script.url.getLocation(function(location) {
+          const sheetId = location.parameters["id"];
+          if (!sheetId) {
+            $("#opening_modal").modal();
+          } else {
+            // this little doober will create a url with the appurl
+            // 1. It only works for public side url, so can't test in dev environment
+            // 2. It needs to be done when you have access to the sheetId
+            // 3. It needs an actual button that will copy it to your clipboard, or open in a tab
+            google.script.run
+              .withSuccessHandler(function(url) {
+                urls.appUrl = url + "?id=" + sheetId;
+                console.log(
+                  "TODO: ADD BUTTON WITH THIS! urls.appUrl",
+                  urls.appUrl
+                );
+              })
+              .getScriptUrl();
+            const url =
+              "https://docs.google.com/spreadsheets/d/" +
+              sheetId +
+              "/edit#gid=0";
+            initializeData(url);
+          }
+        });
+      });
+
+      function sendMeetingAttendence() {
+        const attendenceList = attendenceSelector.val();
+        const actionType = actionTypeSelector.val();
+        attendenceSelector.val(null).trigger("change");
+        actionTypeSelector.val(actionTypes[0].id).trigger("change");
+        google.script.run
+          .withSuccessHandler(refreshData)
+          .markMeetingAttendence(urls.sheetUrl, attendenceList, actionType);
+      }
+
+      async function refreshData() {
+        pageLoading();
+        google.script.run
+          .withSuccessHandler(updateSupportersData)
+          .getSheetData(urls.sheetUrl);
+        google.script.run
+          .withSuccessHandler(updateGoalsData)
+          .getGoals(urls.sheetUrl);
+        updateGoals = false; // only run after second one gets back
+      }
+
+      function updateSupportersData(newData) {
+        sheetData = JSON.parse(newData);
+        columnHeaders = sheetData.shift();
+        const mappedData = sheetData.map(nameArray => ({
+          text: nameArray[1],
+          id: nameArray[1]
+        }));
+        attendenceSelector.select2({
+          data: mappedData
+        });
+        if (updateGoals) {
+          createGoals(false);
+        } else {
+          updateGoals = true;
+        }
+      }
+
+      function updateGoalsData(returnedData) {
+        goalsData = JSON.parse(returnedData);
+        goalsData.shift();
+        if (updateGoals) {
+          createGoals(false);
+        } else {
+          updateGoals = true;
+        }
+      }
+
+      // edit: boolean - whether to open in edit mode
+      function createGoals(editMode) {
+        editingGoals = editMode;
+        const goalSection = document.getElementById("goals_section");
+        while (goalSection.hasChildNodes()) {
+          goalSection.removeChild(goalSection.lastChild);
+        }
+
+        // TODO !edit
+        if (!editMode) {
+          // an array of objects, each object contains the goal end date, and the list of goals for that date
+          const goalEndDates = [];
+          for (goal of goalsData) {
+            const goalEndDate = new Date(goal[3]).toLocaleString();
+            if (goalEndDates.indexOf(goalEndDate) < 0) {
+              goalEndDates.push(goalEndDate);
+            }
+          }
+          goalEndDates.sort();
+
+          // create goals sections
+          for (date of goalEndDates) {
+            const newDateSection = document.createElement("div");
+            goalSection.appendChild(newDateSection);
+
+            const newDateSectionHeader = document.createElement("h5");
+            const text = document.createTextNode(
+              "By " + new Date(date).toLocaleString() + ":"
+            );
+
+            newDateSectionHeader.appendChild(text);
+            newDateSection.appendChild(newDateSectionHeader);
+            newDateSection.className += "mb-3";
+          }
+
+          // great divs for goals and add to goal sections
+          for (goal of goalsData) {
+            const [
+              goalId,
+              goalName,
+              startDate,
+              endDate,
+              goalNumber,
+              targetColumnName,
+              matchingValueString
+            ] = goal;
+            const formattedEndDate = new Date(endDate).toLocaleString();
+
+            let numMatches = 0;
+            const matchingColumnIndex = columnHeaders.indexOf(targetColumnName);
+            const desiredValues = matchingValueString.split(",");
+            //          console.log('desiredValues', desiredValues);
+            for (row of sheetData) {
+              for (desiredValue of desiredValues) {
+                //              console.log(desiredValues, desiredValue);
+                if (row[matchingColumnIndex] === desiredValue) {
+                  //                console.log('match');
+                  numMatches++;
+                }
+              }
+            }
+            const text = document.createTextNode(
+              goalName + ": " + numMatches + "/" + goalNumber
+            );
+
+            const newRow = document.createElement("div");
+            newRow.appendChild(text);
+            // Add it to the approprate goal end date section
+            const goalIndex = goalEndDates.indexOf(formattedEndDate);
+            goalSection.childNodes[goalIndex].appendChild(newRow);
+          }
+          pageLoaded();
+        } else {
+          for (goal of goalsData) {
+            const newRow = document.createElement("div");
+            newRow.className = "mb-3 form-row";
+            goalSection.appendChild(newRow);
+
+            const inputTypes = [
+              "text",
+              "text",
+              "date",
+              "date",
+              "number",
+              "text",
+              "text"
+            ];
+            const labelNames = [
+              "Goal Id",
+              "Goal Name",
+              "Start Date",
+              "End Date",
+              "Goal Number",
+              "Target Column Name",
+              "Matching Value String"
+            ];
+
+            for (var i = 1; i < goal.length; i++) {
+              const newFormGroup = document.createElement("div");
+              newFormGroup.className =
+                "form-group col-12 col-sm-6 col-md-4 col-lg-2";
+              const label = document.createElement("label");
+              label.appendChild(document.createTextNode(labelNames[i]));
+              const input = document.createElement("input");
+              input.value =
+                inputTypes[i] === "date"
+                  ? getFormattedDate(new Date(goal[i]))
+                  : goal[i];
+              input.type = inputTypes[i];
+              input.className = "form-control";
+              newFormGroup.appendChild(label);
+              newFormGroup.appendChild(input);
+              newRow.appendChild(newFormGroup);
+            }
+
+            //            const [
+            //              goalId, goalName, startDate, endDate, goalNumber, targetColumnName, matchingValueString
+            //            ] = goal;
+            goalSection.appendChild(document.createElement("hr"));
+          }
+          pageLoaded();
+        }
+      }
+
+      function getFormattedDate(date) {
+        return (
+          date.getFullYear() +
+          "-" +
+          ("0" + (date.getMonth() + 1)).slice(-2) +
+          "-" +
+          ("0" + date.getDate()).slice(-2)
+        );
+      }
+
+      function switchGoals() {
+        editingGoals = !editingGoals;
+        // get the text node from the button
+        const buttonText = document.getElementById("edit_goals_button")
+          .childNodes[0];
+        if (editingGoals) {
+          buttonText.nodeValue = "Save Goals";
+        } else {
+          // clicked Save goals
+          saveGoals();
+          buttonText.nodeValue = "Edit Goals";
+        }
+        createGoals(editingGoals);
+      }
+
+      function saveGoals() {
+        const goalData = [];
+        const formRows = document.getElementById("goals_section").childNodes;
+        for (formRow of formRows) {
+          const formGroups = formRow.childNodes;
+          if (formGroups.length) {
+            const rowData = [];
+            goalData.push(rowData);
+            for (formGroup of formGroups) {
+              const input = formGroup.childNodes[1]; // label then input
+              rowData.push(input.value);
+            }
+          }
+        }
+        console.log(goalData);
+
+        // Save to google sheet
+        google.script.run.updateGoals(urls.sheetUrl, goalData); // .withSuccessHandler(createdFormAndSheetHandler)
+      }
+
+      function initializeData(url) {
+        urls.sheetUrl = url
+          ? url
+          : document.getElementById("sheetUrlInput").value;
+        if (!urls.sheetUrl) {
+          const orgName = document.getElementById("nameInput").value;
+          const supportDescription = document.getElementById(
+            "supportDescription"
+          ).value;
+          console.log("calling backend");
+          google.script.run
+            .withSuccessHandler(createdFormAndSheetHandler)
+            .createFormAndSheet(orgName, supportDescription);
+        } else {
+          document.getElementById("sheet_link_button").href = urls.sheetUrl;
+          refreshData();
+        }
+      }
+
+      function createdFormAndSheetHandler(returnedData) {
+        urls = returnedData;
+        document
+          .getElementById("sheet_link_button")
+          .setAttribute("href", urls.sheetUrl);
+        refreshData();
+      }
+
+      function pageLoaded() {
+        console.log("pageLoaded");
+        $("#loader")
+          .delay(800)
+          .fadeOut(400, function() {
+            $("#body").fadeIn(400, function() {
+              document
+                .getElementById("sheet_link_button")
+                .setAttribute("href", urls.sheetUrl);
+            });
+          });
+      }
+
+      function pageLoading() {
+        console.log("pageLoading");
+        $("#body")
+          .delay(800)
+          .fadeOut(400, function() {
+            $("#loader").fadeIn(400);
+          });
+      }
+    </script>
+  </head>
+  <body>
+    <div class="modal" id="opening_modal" tabindex="-1" role="dialog">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Welcome to org builder!</h5>
+          </div>
+          <div class="modal-body">
+            <h2 class="card-title">Either make a new org...</h2>
+            <h5>Hey girl, what's your organization called?</h5>
+            <input type="text" id="nameInput" />
+            <h5 class="mt-2">
+              Hey girl, what are you asking people to support?
+            </h5>
+            <p>
+              ex. By signing up I indicate my support for divestment from fossil
+              fuels.
+            </p>
+            <input type="text" id="supportDescription" />
+            <hr />
+            <h2 class="card-title">...or enter your campaign's sheet url.</h2>
+            <input type="text" id="sheetUrlInput" />
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              onclick="initializeData()"
+              class="btn btn-primary"
+              data-dismiss="modal"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="d-flex justify-content-center">
+      <div
+        class="spinner-border"
+        role="status"
+        id="loader"
+        style="margin-top: 15rem;"
+      >
+        <span class="sr-only">Loading...</span>
+      </div>
+    </div>
+    <div class="container" id="body" style="display:none">
+      <h1>Your Dashboard</h1>
+      <button class="btn btn-secondary" onclick="refreshData()" type="button">
+        Refresh Data
+      </button>
+      <a
+        class="btn btn-link"
+        id="sheet_link_button"
+        type="button"
+        target="_blank"
+        >My Sheet</a
+      >
+      <div class="card mb-4 mt-4">
+        <div class="card-body">
+          <div class="d-flex">
+            <h2 class="card-title">Goals</h2>
+            <button
+              class="btn btn-primary ml-auto"
+              onclick="switchGoals()"
+              type="button"
+              id="edit_goals_button"
+            >
+              Edit Goals
+            </button>
+          </div>
+          <div id="goals_section"></div>
+        </div>
+      </div>
+      <div class="card mb-5">
+        <div class="card-body">
+          <h2 class="card-title">Take Attendence</h2>
+          <h5>What type of action are people taking?</h5>
+          <select id="action_type_selector" style="width: 300px;"></select>
+          <h5 class="mt-2">Select Meeting Attendees</h5>
+          <div class="d-flex">
+            <select
+              id="attendence_selector"
+              name="attendees[]"
+              multiple="multiple"
+              style="width: 300px; margin-left: 15px;"
+              class="ml-3"
+            ></select>
+            <button
+              class="btn btn-primary ml-auto"
+              onclick="sendMeetingAttendence()"
+              type="button"
+            >
+              Send Meeting Attendence
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
